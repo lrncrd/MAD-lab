@@ -7,6 +7,19 @@ import geopandas
 import pandas as pd
 import numpy as np
 from rasterio.mask import mask
+import matplotlib.colors as colors
+import matplotlib.cm as cmx
+import pyproj
+from bokeh.plotting import figure, show
+from bokeh.io import output_notebook
+
+from bokeh.tile_providers import OSM, get_provider
+from bokeh.palettes import  Category10_10
+from bokeh.models import (
+    ColumnDataSource,
+    HoverTool,
+    CategoricalColorMapper
+    )
 
 
 
@@ -83,3 +96,94 @@ def Zonal_stats(vector, raster, buffer_size=0.1):
         
     return zonal_stats_df
 
+
+def Color_mapper(point_color, color_map = "viridis"):
+    #Get unique value from PandasSeries and removing NaN
+    point_color.dropna(inplace = True)
+    uniq = list(set(point_color))
+
+    # Set the color map to match the uniq
+    z = range(1,len(uniq))
+    color_map = plt.get_cmap(color_map)
+    cNorm  = colors.Normalize(vmin=0, vmax=len(uniq))
+    scalarMap = cmx.ScalarMappable(norm=cNorm, cmap=color_map)
+
+    return uniq, scalarMap
+
+
+
+
+def InteractiveGeoPlotting(geo_df, size=None, color = None, point_size = 2, hover_data=None):
+    df_geo = geo_df.copy()
+
+    coord_x, coord_y = df_geo.geometry.x, df_geo.geometry.y
+    
+    ### TO DO: GET EPSG FROM DATASET
+    proj = pyproj.Transformer.from_crs(32632, 3857, always_xy=True)
+    
+    
+
+    coord_x, coord_y = proj.transform(coord_x, coord_y)
+
+    df_geo["x"], df_geo["y"] = coord_x, coord_y
+
+    p_df = df_geo.drop('geometry', axis=1).copy()
+
+    output_notebook()
+ 
+    if color:
+        my_legend_name = str(p_df[color].name)
+        p_df = p_df.loc[p_df[color].index]
+        uniq, _ = Color_mapper(p_df[color])
+        color_mapping = CategoricalColorMapper(factors=uniq, palette= Category10_10)
+    else:
+        pass
+
+    tile_provider = get_provider(OSM)
+    datasource = ColumnDataSource(p_df)
+
+
+    min_x, max_x = min(p_df["x"]), max(p_df["x"])
+    min_y, max_y = min(p_df["y"]), max(p_df["y"])
+
+    # range bounds supplied in web mercator coordinates
+    p = figure(x_range=(min_x, max_x), y_range=(min_y, max_y),
+            x_axis_type="mercator", y_axis_type="mercator")
+    p.add_tile(tile_provider)
+
+
+    if color:
+
+        p.circle(
+                'x',
+                'y',
+                source=datasource,
+                color=dict(field=my_legend_name, transform=color_mapping),
+                legend_group=my_legend_name,
+                line_alpha=1,
+                fill_alpha=1,
+                size=size if size else point_size)
+
+
+
+    else:    
+
+
+        p.circle(
+                'x',
+                'y',
+                source=datasource,
+                color="black",
+                line_alpha=1,
+                fill_alpha=1,
+                size=size if size else point_size)
+
+
+    
+    my_hover = HoverTool()
+    
+    if hover_data:
+        my_hover.tooltips = [(f'{hover_data[n]}', f'@{hover_data[n]}') for n, i in enumerate(hover_data)]
+        p.add_tools(my_hover)
+
+    show(p)
